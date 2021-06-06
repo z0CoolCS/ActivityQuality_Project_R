@@ -22,7 +22,7 @@ if (!dir.exists("data")) {
 ```
 ## Loading Data and libraries
 Before loading the data, it is neccesary to look inside the files how it is structured. So, I noticed it has many empty strings (""), so we need to define na values in the *read.csv* function.
-```{r, echo=FALSE, message=FALSE}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 install.packages("corrplot", dependencies = T)
 install.packages("tidyverse", dependencies = T)
 install.packages("rattle", dependencies = T)
@@ -54,7 +54,7 @@ ggplot(data = datos_long, aes(x = variable, y = X, fill = ausente)) +
   geom_raster() +
   scale_fill_manual(values = c("gray60", "orangered2")) +
   theme_bw() +
-  labs(title = "Valores ausentes por variable") +
+  labs(title = "NA values for variable") +
   theme(legend.position = "bottom")
 dev.off()
 ```
@@ -71,11 +71,11 @@ testing <- testing[,index_notNA]
 
 map_dbl(training, .f = function(x){sum(is.na(x))})
 ```
-Additionally, I noticed the first seven varaibles do not offer any important information because there are string or incremental variables.  
+Additionally, I noticed the first seven variables do not offer any important information because they are string or incremental variables.  
 ```{r}
 str(training)
 ```
-So, we ommit them.  
+So, we omit columns from one to seven.  
 ```{r}
 training <- training[,-c(1:7)]
 testing <- testing[,-c(1:7)]
@@ -89,7 +89,7 @@ training_tr <- training[indexTrain, ]
 valid <- training[-indexTrain, ]
 ```
 
-Another fact, it find which varaibles are highly correlated. If we can find them, we can ommit some of them in order to get loss computational load but still have a good accuracy.  For that purpose, we use *corrplot* with order set to hclust to see some possible omissions in our analysis.  
+Another fact, it find which variables are highly correlated. If we can find them, we can omit some of them in order to get loss computational load but still have a good accuracy. For that purpose, we use *corrplot* with order set to hclust to see some possible omissions in our analysis.  
 
 ```{r}
 png(file="correlation_train.png", res=96, width=1000, height=1000)
@@ -104,7 +104,7 @@ diag(M) <- 0
 paste("There are ", dim(which(M > 0.72, arr.ind = T))[1] / 2, "variables highly correlated each other.")
 ```
 
-Later, in order to scale with our methdology, I surround with PCA.  
+Later, in order to scale with our methodology, I will use only variable which give me 95\% of explanation about the data with PCA.  
 ```{r}
 set.seed(123)
 pp_pca <- preProcess(training_tr[,-53],method="pca", thresh=0.95)
@@ -118,16 +118,15 @@ training_pca$classe <- training_tr$classe
 
 valid_pca <- predict(pp_pca, valid[,-53]) 
 valid_pca$classe <- valid$classe
-
 ```
 
-### Support Vector Machine
+### Support Vector Machine - SVM
+My first intuition is using SVM with kernelization. 
 ```{r}
 set.seed(123)
 
 control_train <- trainControl(method = "repeatedcv", number = 3,
-                              repeats = 2, returnResamp = "final", verboseIter = FALSE,
-                              allowParallel = TRUE)
+                              repeats = 2, returnResamp = "final", verboseIter = FALSE,allowParallel = TRUE)
 
 hiperparametros <- expand.grid(sigma = c(0.001, 0.01, 0.1, 0.5, 1),
                                C = c(1 , 20, 50, 100, 200, 500, 700))
@@ -145,7 +144,6 @@ confusion_matrix_svm <- confusionMatrix(valid$classe,predicted_svm)
 plt <- as.data.frame(round(prop.table(confusion_matrix_svm$table), 2))
 
 
-
 plt$Prediction <- factor(plt$Prediction, levels=rev(levels(plt$Prediction)))
 
 png(file="cm_svm.png", res=96, width=1000, height=1000)
@@ -157,13 +155,14 @@ ggplot(plt, aes(Prediction,Reference, fill= Freq)) +
         scale_y_discrete(labels=rev(classes))
 dev.off()
 ```
+Getting `r confusion_matrix_svm$overall[1]` of precision with the valid. 
+
 ![Confusion Matrix of SVM](cm_svm.png)
 
 ### Decision Tree
+In order to compere with another machine learning algorithm, I decided to used decision tree. 
 ```{r}
-control_train <- trainControl(method = "repeatedcv", number = 3,
-                              repeats = 2, returnResamp = "final", verboseIter = FALSE,
-                              allowParallel = TRUE)
+control_train <- trainControl(method = "repeatedcv", number = 3, repeats = 2, returnResamp = "final", verboseIter = FALSE, allowParallel = TRUE)
 modelo_dt <- train(classe~., data=training_pca, method="rpart", trControl=control_train)
 
 predicted_dt <- predict(modelo_dt,newdata=valid_pca)
@@ -182,18 +181,21 @@ ggplot(plt_dt, aes(Prediction,Reference, fill= Freq)) +
 dev.off()
 
 ```
+Unfortunately, I only got `r confusion_matrix_dt$overall[1]` of precision.  
 
 ![Confusion Matrix of Decision Tree.](cm_dt.png)
 
 ### Random Forest
+After using decision tree, I tried with random forest. 
+
 ```{r}
-control_train <- trainControl(method = "repeatedcv", number = 3,
-                              repeats = 2, returnResamp = "final", verboseIter = FALSE,
-                              allowParallel = TRUE)
+control_train <- trainControl(method = "repeatedcv", number = 3, repeats = 2, returnResamp = "final", verboseIter = FALSE, allowParallel = TRUE)
 model_rf <- train(classe~., data=training_pca, method="rf", trControl=control_train, verbose=FALSE)
 
 predicted_rf <- predict(model_rf,newdata=valid_pca)
 confusion_matrix_rf <- confusionMatrix(valid_pca$classe,predicted_rf)
+
+
 
 plt_rf <- as.data.frame(round(prop.table(confusion_matrix_rf$table), 2))
 plt_rf$Prediction <- factor(plt_rf$Prediction, levels=rev(levels(plt_rf$Prediction)))
@@ -208,5 +210,14 @@ ggplot(plt_rf, aes(Prediction,Reference, fill= Freq)) +
 dev.off()
 
 ```
+Fortunately, random forest gave me `r confusion_matrix_rf$overall[1]` of precision, so I took it to predict with test data.
 ![Confusion Matrix of Random Forest.](cm_rf.png)
+
+## Results
+Finally, I used random forest to get the answers for the testing data.  
+```{r}
+dim(testing)
+testing_pc <- predict(pp_pca, testing[,-53])
+predict(model_rf, testing_pc)
+```
 
